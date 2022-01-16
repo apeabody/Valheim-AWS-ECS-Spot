@@ -1,0 +1,351 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Valheim Spot Price Server via Docker / ECS
+Parameters:
+
+  ECSAMI:
+    Description: AWS ECS AMI ID
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+
+  ImageTag:
+    Type: String
+    Description: "Defaults to 'latest', refer to tag descriptions available here: https://hub.docker.com/r/mbround18/valheim"
+    Default: latest
+
+  ServerState:
+    Type: String
+    Description: "Running: A spot instance will launch shortly after setting this parameter; your Valheim server should start within 5-10 minutes of changing this parameter (once UPDATE_IN_PROGRESS becomes UPDATE_COMPLETE). Stopped: Your spot instance (and thus Valheim container) will be terminated shortly after setting this parameter."
+    Default: Running
+    AllowedValues: 
+    - Running
+    - Stopped
+
+  InstanceType:
+    Type: String
+    Description: "m3.medium is a good cost effective (albeit older) instance, 1 VCPU and 3.75 GB of RAM with moderate network performance. Change at your discretion, however the instance MUST have at least 3.75GB of RAM. https://aws.amazon.com/ec2/instance-types/."
+    Default: m3.medium
+
+  SpotPrice:
+    Type: String
+    Description: "An m3.medium shouldn't cost more than a cent per hour. Note: Leave this blank to use on-demand pricing."
+    Default: "0.05"
+
+  EC2ICRANGE:
+    Type: String
+    Description: "(Optional - An empty value disables this feature) EC2_INSTANCE_CONNECT range for your region https://ip-ranges.amazonaws.com/ip-ranges.json"
+    Default: ''
+
+  ServerName:
+    Type: String
+    Description: "Valheim Server Name, can't be the same as world name. Refer to https://hub.docker.com/r/mbround18/valheim for configuration details."
+    Default: 'Valheim Docker'
+    
+  WorldName:
+    Type: String
+    Description: "Valheim World Name, can't be the same as server name. Refer to https://hub.docker.com/r/mbround18/valheim for configuration details."
+    Default: 'Dedicated'
+
+  Password:
+    Type: String
+    Description: "Set a password required to join your game. Refer to https://hub.docker.com/r/mbround18/valheim for configuration details."
+    Default: '<please set me>'
+
+  WEBHOOKURL:
+    Type: String
+    Description: "(Optional - An empty value disables this feature) Refer to https://hub.docker.com/r/mbround18/valheim for configuration details."
+    Default: ''
+
+  UPDATEONSTARTUP:
+    Type: String
+    Description: "Refer to https://hub.docker.com/r/mbround18/valheim for configuration details."
+    Default: 1
+    AllowedValues:
+    - 1
+    - 0
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: 
+          default: Essential Configuration
+        Parameters:
+        - ImageTag
+        - ServerState
+        - InstanceType
+        - SpotPrice
+        - ServerName
+        - WorldName
+        - Password
+
+Conditions:
+  EC2ICRANGEProvided: !Not [ !Equals [ !Ref EC2ICRANGE, '' ] ]
+  SpotPriceProvided: !Not [ !Equals [ !Ref SpotPrice, '' ] ]
+
+Mappings:
+  ServerState:
+    Running:
+      DesiredCapacity: 1
+    Stopped:
+      DesiredCapacity: 0
+
+Resources:
+
+  # ====================================================
+  # BASIC VPC
+  # ====================================================
+
+  Vpc: 
+    Type: AWS::EC2::VPC
+    Properties: 
+      CidrBlock: 10.100.0.0/26
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select 
+      - 0
+      - !GetAZs 
+        Ref: 'AWS::Region'
+      CidrBlock: !Select [ 0, !Cidr [ 10.100.0.0/26, 4, 4 ] ]
+      VpcId: !Ref Vpc  
+
+  SubnetARoute:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref SubnetA
+
+  SubnetBRoute:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      RouteTableId: !Ref RouteTable
+      SubnetId: !Ref SubnetB  
+
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select 
+      - 1
+      - !GetAZs 
+        Ref: 'AWS::Region'
+      CidrBlock: !Select [ 1, !Cidr [ 10.100.0.0/26, 4, 4 ] ]
+      VpcId: !Ref Vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties: {}
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref Vpc
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: 
+      VpcId: !Ref Vpc    
+
+  Route:
+    Type: AWS::EC2::Route
+    Properties: 
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref RouteTable
+
+  # ====================================================
+  # EFS FOR PERSISTENT DATA
+  # ====================================================
+
+  ConfigEfs:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      Encrypted: true
+      LifecyclePolicies:
+      - TransitionToIA: AFTER_7_DAYS
+      - TransitionToPrimaryStorageClass: AFTER_1_ACCESS
+
+  MountA:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref ConfigEfs
+      SecurityGroups:
+      - !Ref EfsSg
+      SubnetId: !Ref SubnetA
+
+  MountB:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref ConfigEfs
+      SecurityGroups:
+      - !Ref EfsSg
+      SubnetId: !Ref SubnetB
+
+  EfsSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupName: !Sub "${AWS::StackName}-efs"
+      GroupDescription: !Sub "${AWS::StackName}-efs"
+      SecurityGroupIngress:
+      - FromPort: 2049
+        ToPort: 2049
+        IpProtocol: tcp
+        SourceSecurityGroupId: !Ref Ec2Sg
+      VpcId: !Ref Vpc
+      
+  # ====================================================
+  # INSTANCE CONFIG
+  # ====================================================
+
+  Ec2Sg:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupName: !Sub "${AWS::StackName}-ec2"
+      GroupDescription: !Sub "${AWS::StackName}-ec2"
+      SecurityGroupIngress:
+      - !If
+        - EC2ICRANGEProvided 
+        - FromPort: 22
+          ToPort: 22
+          IpProtocol: tcp
+          CidrIp: !Ref EC2ICRANGE
+        - !Ref 'AWS::NoValue'
+      - FromPort: 2456
+        ToPort: 2458
+        IpProtocol: udp
+        CidrIp: 0.0.0.0/0
+      VpcId: !Ref Vpc
+
+  LaunchConfiguration:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      AssociatePublicIpAddress: true
+      IamInstanceProfile: !Ref InstanceProfile
+      ImageId: !Ref ECSAMI
+      InstanceType: !Ref InstanceType
+      SecurityGroups:
+      - !Ref Ec2Sg
+      SpotPrice: !If [ SpotPriceProvided, !Ref SpotPrice, !Ref 'AWS::NoValue' ]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          yum update -y
+          yum install yum-cron amazon-efs-utils ec2-instance-connect botocore -y
+          service yum-cron start
+          echo ECS_CLUSTER=${EcsCluster} >> /etc/ecs/ecs.config          
+
+  AutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: !Sub "${AWS::StackName}-asg"
+      DesiredCapacity: !FindInMap [ ServerState, !Ref ServerState, DesiredCapacity ]
+      LaunchConfigurationName: !Ref LaunchConfiguration
+      MaxSize: !FindInMap [ ServerState, !Ref ServerState, DesiredCapacity ]
+      MinSize: !FindInMap [ ServerState, !Ref ServerState, DesiredCapacity ]
+      VPCZoneIdentifier:
+        - !Ref SubnetA
+        - !Ref SubnetB
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/EC2InstanceConnect
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      Roles:
+        - !Ref InstanceRole
+
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${AWS::StackName}-cluster"
+
+  EcsService:
+    Type: AWS::ECS::Service
+    Properties: 
+      Cluster: !Ref EcsCluster
+      DesiredCount: !FindInMap [ ServerState, !Ref ServerState, DesiredCapacity ]
+      ServiceName: !Sub "${AWS::StackName}-ecs-service"
+      TaskDefinition: !Ref EcsTask  
+      DeploymentConfiguration:
+        MaximumPercent: 100
+        MinimumHealthyPercent: 0
+
+  EcsTask:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn:
+    - MountA
+    - MountB
+    Properties:
+      Volumes:
+      - Name: "efs-valheim-config"
+        EFSVolumeConfiguration:
+          FilesystemId: !Ref ConfigEfs
+          TransitEncryption: "ENABLED"
+      ContainerDefinitions:
+        - Name: valheim
+          MemoryReservation: 3754
+          Image: !Sub "mbround18/valheim:${ImageTag}"
+          PortMappings:
+          - ContainerPort: 2456
+            HostPort: 2456
+            Protocol: udp
+          - ContainerPort: 2457
+            HostPort: 2457
+            Protocol: udp
+          - ContainerPort: 2458
+            HostPort: 2458
+            Protocol: udp
+          MountPoints:
+          - ContainerPath: /home/steam/.config/unity3d/IronGate/Valheim/
+            SourceVolume: efs-valheim-config
+            ReadOnly: false
+          Environment:
+          - Name: PORT
+            Value: 2456
+          - Name: NAME
+            Value: !Ref ServerName
+          - Name: WORLD
+            Value: !Ref WorldName
+          - Name: PASSWORD
+            Value: !Ref Password
+          - Name: WEBHOOK_URL
+            Value: !Ref WEBHOOKURL
+          - Name: UPDATE_ON_STARTUP
+            Value: !Ref UPDATEONSTARTUP
+          - Name: AUTO_BACKUP
+            Value: 1
+          - Name: AUTO_BACKUP_ON_UPDATE
+            Value: 1
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref myLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: "ecs"
+
+  myLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties: 
+      LogGroupName: !Sub "ecs/${AWS::StackName}"
+      RetentionInDays: 7
+
+Outputs:
+  CheckInstanceIp:
+    Description: "Locate your Valehim Public IP address:"
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/ec2/v2/home?region=${AWS::Region}#Instances:tag:aws:autoscaling:groupName=${AutoScalingGroup};sort=tag:Name"
