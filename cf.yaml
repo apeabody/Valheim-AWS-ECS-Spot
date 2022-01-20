@@ -63,6 +63,21 @@ Parameters:
     - 1
     - 0
 
+  TYPE:
+    Type: String
+    Description: "Refer to https://github.com/mbround18/valheim-docker/blob/main/docs/tutorials/getting_started_with_mods.md for configuration details."
+    Default: Vanilla
+    AllowedValues:
+    - Vanilla
+    - BepInEx
+    - BepInExFull
+    - ValheimPlus
+
+  MODS:
+    Type: String
+    Description: "Requires a TYPE other than Vanilla.  Refer to https://github.com/mbround18/valheim-docker/blob/main/docs/tutorials/getting_started_with_mods.md for configuration details."
+    Default: ''
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -76,6 +91,11 @@ Metadata:
         - ServerName
         - WorldName
         - Password
+      - Label:
+          default: Mods
+        Parameters:
+        - TYPE
+        - MODS
 
 Conditions:
   EC2ICRANGEProvided: !Not [ !Equals [ !Ref EC2ICRANGE, '' ] ]
@@ -333,6 +353,10 @@ Resources:
             Value: 1
           - Name: AUTO_BACKUP_ON_UPDATE
             Value: 1
+          - Name: TYPE
+            Value: !Ref TYPE
+          - Name: MODS
+            Value: !Ref MODS
           LogConfiguration:
             LogDriver: awslogs
             Options:
