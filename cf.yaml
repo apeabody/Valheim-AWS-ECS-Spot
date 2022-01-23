@@ -55,6 +55,14 @@ Parameters:
     Description: "(Optional - An empty value disables this feature) Refer to https://hub.docker.com/r/mbround18/valheim for configuration details."
     Default: ''
 
+  WEBHOOKINCLUDEPUBLICIP:
+    Type: String
+    Description: "Includes the sever's public IP in Webook notifications.  Refer to https://hub.docker.com/r/mbround18/valheim for configuration details."
+    Default: '0'
+    AllowedValues:
+    - 1
+    - 0
+
   UPDATEONSTARTUP:
     Type: String
     Description: "Refer to https://hub.docker.com/r/mbround18/valheim for configuration details."
@@ -96,6 +104,11 @@ Metadata:
         Parameters:
         - TYPE
         - MODS
+      - Label:
+          default: Webhooks
+        Parameters:
+        - WEBHOOKURL
+        - WEBHOOK_INCLUDE_PUBLIC_IP
 
 Conditions:
   EC2ICRANGEProvided: !Not [ !Equals [ !Ref EC2ICRANGE, '' ] ]
@@ -347,6 +360,8 @@ Resources:
             Value: !Ref Password
           - Name: WEBHOOK_URL
             Value: !Ref WEBHOOKURL
+          - Name: WEBHOOK_INCLUDE_PUBLIC_IP
+            Value: !Ref WEBHOOKINCLUDEPUBLICIP
           - Name: UPDATE_ON_STARTUP
             Value: !Ref UPDATEONSTARTUP
           - Name: AUTO_BACKUP
