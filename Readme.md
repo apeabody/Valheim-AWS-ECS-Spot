@@ -9,7 +9,7 @@ This CloudFormation template can be used to deploy a Valheim dedicated server to
 
 ## Overview
 
-The solution builds upon the [mbround18/valheim](https://hub.docker.com/r/mbround18/valheim) Docker image, so generously curated by [mbround18](https://github.com/mbround18) and [contributors](https://github.com/mbround18/valheim-docker/graphs/contributors) - Thank You!
+The solution builds upon the [mbround18/valheim](https://hub.docker.com/r/mbround18/valheim) Docker image, so generously curated by [mbround18](https://github.com/mbround18) and [contributors](https://github.com/mbround18/valheim-docker/graphs/contributors) - Thank You!  Thanks also goes to [m-chandler](https://github.com/m-chandler) for [factorio-spot-pricing](https://github.com/m-chandler/factorio-spot-pricing) (and [contributors](https://github.com/m-chandler/factorio-spot-pricing/graphs/contributors)) upon which this solution and documentation is based.
 
 The CloudFormation template launches an _ephemeral_ [EC2 Spot Instance](https://aws.amazon.com/ec2/spot) which joins itself to an [Elastic Container Service (ECS)](https://aws.amazon.com/ecs/) Cluster. Within this ECS Cluster, an ECS Service is configured to run the above Valheim Docker image. The ephemeral instance does not store the world lcaolly, this is stored on persistent [Elastic File System (EFS)](https://aws.amazon.com/efs/).
 
