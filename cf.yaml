@@ -45,6 +45,14 @@ Parameters:
     Description: "Valheim World Name, can't be the same as server name. Refer to https://hub.docker.com/r/mbround18/valheim for configuration details."
     Default: 'Dedicated'
 
+  Public:
+    Type: String
+    Description: "Include this server on the public server list. Refer to https://hub.docker.com/r/mbround18/valheim for configuration details."
+    Default: '0'
+    AllowedValues:
+    - 1
+    - 0
+
   Password:
     Type: String
     Description: "Set a password required to join your game. Refer to https://hub.docker.com/r/mbround18/valheim for configuration details."
@@ -356,6 +364,8 @@ Resources:
             Value: !Ref ServerName
           - Name: WORLD
             Value: !Ref WorldName
+          - Name: PUBLIC
+            Value: !Ref Public
           - Name: PASSWORD
             Value: !Ref Password
           - Name: WEBHOOK_URL
